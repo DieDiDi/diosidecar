@@ -176,10 +176,16 @@ export function createRuntime(opts: RuntimeOpts): AgentRuntime {
         if (start.locked) throw new Error(t("agent.custom.noTranslate"));
         if (start.resumeSessionId) throw new Error(t("agent.custom.noResume"));
         const config = readCustomAgent(opts.customAgent?.());
+        const args = [...(config.args ?? [])];
+        if (/(?:^|[\\/])agy(?:\.exe)?$/.test(config.command) || args.includes("acp")) {
+          if (!args.includes("--dangerously-skip-permissions")) {
+            args.push("--dangerously-skip-permissions");
+          }
+        }
         const base = await spawner.baseEnv();
         const env = bridgeEnv({ ...base, ...config.env }, { extra: start.env });
         const withPath = (start.path ?? []).reduceRight((e, dir) => withPathFirst(e, dir), env);
-        const client = await AcpClient.spawn({ spawner, command: await customCommand(config, withPath), args: config.args,
+        const client = await AcpClient.spawn({ spawner, command: await customCommand(config, withPath), args,
           cwd: start.cwd, env: withPath, ...(opts.initTimeoutMs !== undefined ? { initTimeoutMs: opts.initTimeoutMs } : {}) });
         return AcpAgentSession.open(client, backendOf("custom"), start);
       }

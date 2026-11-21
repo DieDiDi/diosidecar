@@ -1,15 +1,21 @@
-name: Build macOS preview
+name: Release
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0; optional, defaults to package.json version)'
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  build-mac:
+    name: Build macOS
     runs-on: macos-15
     steps:
       - name: Checkout repository with drawio submodule
@@ -24,7 +30,7 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Check release version
-        if: github.event_name == 'push'
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -66,44 +72,111 @@ jobs:
           git -C drawio archive HEAD | tar -xf - -C "$archive_dir/$archive_root/drawio"
           tar -czf "dist/$archive_root-source.tar.gz" -C "$archive_dir" "$archive_root"
 
-      - name: Upload preview files
+      - name: Upload macOS preview files
         uses: actions/upload-artifact@v4
         with:
-          name: diosidecar-preview
+          name: diosidecar-macos-arm64
           path: |
             dist/*.dmg
             dist/*.zip
             dist/*-source.tar.gz
           if-no-files-found: error
 
-  draft:
-    if: github.event_name == 'push'
-    needs: build
+  build-win:
+    name: Build Windows
+    runs-on: windows-2025
+    steps:
+      - name: Checkout repository with drawio submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: Install Agent dependencies
+        run: npm --prefix agent ci
+
+      - name: Typecheck Agent
+        run: npm run typecheck:agent
+
+      - name: Package Windows x64
+        run: npm run release:win
+
+      - name: Check preview files
+        run: |
+          foreach ($pattern in @('*.exe', '*.zip')) {
+            if (!(Get-ChildItem -LiteralPath dist -Filter $pattern -File)) {
+              throw "Expected a $pattern preview file in dist"
+            }
+          }
+
+      - name: Upload Windows preview files
+        uses: actions/upload-artifact@v4
+        with:
+          name: diosidecar-windows-x64
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish Draft Release
+    needs: [build-mac, build-win]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download preview files
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Determine tag name
+        id: meta
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v$(node -p "require('./package.json').version")"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: diosidecar-preview
           path: release-assets
+          merge-multiple: true
 
-      - name: Generate checksums
+      - name: Inspect and generate unified checksums
         working-directory: release-assets
-        run: sha256sum * > SHA256SUMS.txt
+        run: |
+          ls -la
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      - name: Create draft prerelease
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          name: DioSidecar ${{ github.ref_name }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: DioSidecar ${{ steps.meta.outputs.tag }}
           draft: true
           prerelease: true
           generate_release_notes: true
           body: |
-            This preview targets macOS on Apple Silicon. Automated builds are not signed with a Developer ID or notarized.
+            This release includes automated desktop preview packages for macOS (Apple Silicon) and Windows (x64).
+            Automated builds are not signed or notarized.
 
-            The `-source.tar.gz` archive includes the pinned draw.io editor sources, build scripts and license notices. After extracting it, follow the source build steps in the README starting at `npm run setup`.
+            The `-source.tar.gz` archive includes the pinned draw.io editor sources, build scripts and license notices.
 
-            Verify your download against `SHA256SUMS.txt`.
+            Verify your downloads against `SHA256SUMS.txt`.
           files: release-assets/*

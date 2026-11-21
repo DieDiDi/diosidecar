@@ -1,8 +1,8 @@
 // Electron Main process entry for drawio-agent (Phase 3: full PanelHost backend,
 // ACP multi-backend runtime, Stdio Canvas MCP bridge, Option C approval gate via session.#pending,
 // electron-store PanelSettings, safeStorage macOS Keychain API keys, JSONL session store, capturePage)
-import { mkdir, readdir, stat, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
@@ -572,6 +572,100 @@ export function initDrawioAgent({ app, ipcMain, BrowserWindow, safeStorage, dial
           const varName = BACKENDS[backend]?.apiKeyVars[0];
           if (apiKey && varName) extraEnv[varName] = apiKey;
         }
+
+        // For pi: pi CLI loads MCP from project-level .pi/mcp.json with exposure: "direct"
+        // and checks ~/.pi/agent/trust.json to verify that cwd is trusted.
+        if (backend === "pi") {
+          try {
+            const piBin = await findBinary(spawner, env, "pi");
+            if (piBin) extraEnv.PI_ACP_PI_COMMAND = piBin;
+
+            const piDir = join(cwd, ".pi");
+            await mkdir(piDir, { recursive: true });
+            const piMcpConfig = {
+              mcpServers: {
+                "drawio-canvas": {
+                  command: nodeBin,
+                  args: [mcpServerPath],
+                  env: {
+                    DRAWIO_BRIDGE_URL: bridge.url,
+                    DRAWIO_BRIDGE_TOKEN: bridge.token,
+                    DRAWIO_WINDOW_ID: String(wcId),
+                    DRAWIO_ELK_URL: localElkPath,
+                    DRAWIO_SHAPE_INDEX_PATH: shapeIndexPath,
+                  },
+                  exposure: "direct",
+                },
+              },
+            };
+            await writeFile(join(piDir, "mcp.json"), JSON.stringify(piMcpConfig, null, 2), "utf8");
+
+            const trustPath = join(homedir(), ".pi", "agent", "trust.json");
+            let trustData: Record<string, boolean> = {};
+            try {
+              trustData = JSON.parse(await readFile(trustPath, "utf8"));
+            } catch {}
+            if (!trustData[cwd]) {
+              trustData[cwd] = true;
+              await mkdir(dirname(trustPath), { recursive: true });
+              await writeFile(trustPath, JSON.stringify(trustData, null, 2), "utf8");
+            }
+            extraEnv.PI_APPROVE = "1";
+          } catch (e) {
+            console.warn("[drawio-agent] failed to setup pi mcp.json / trust.json:", e);
+          }
+        }
+
+        // For opencode: opencode CLI loads MCP servers from opencode.json in project root (cwd)
+        // and uses permission: { "*": "allow" } for non-blocking direct tool execution.
+        if (backend === "opencode") {
+          try {
+            const opencodeConfig = {
+              "$schema": "https://opencode.ai/config.json",
+              mcp: {
+                servers: {
+                  "drawio-canvas": {
+                    command: nodeBin,
+                    args: [mcpServerPath],
+                    env: {
+                      DRAWIO_BRIDGE_URL: bridge.url,
+                      DRAWIO_BRIDGE_TOKEN: bridge.token,
+                      DRAWIO_WINDOW_ID: String(wcId),
+                      DRAWIO_ELK_URL: localElkPath,
+                      DRAWIO_SHAPE_INDEX_PATH: shapeIndexPath,
+                    },
+                  },
+                },
+              },
+              permission: {
+                "*": "allow",
+              },
+            };
+            await writeFile(join(cwd, "opencode.json"), JSON.stringify(opencodeConfig, null, 2), "utf8");
+          } catch (e) {
+            console.warn("[drawio-agent] failed to setup opencode.json:", e);
+          }
+        }
+
+        // Also write standard .mcp.json in cwd for generic MCP clients (Claude Code, etc.)
+        try {
+          const stdMcpConfig = {
+            mcpServers: {
+              "drawio-canvas": {
+                command: nodeBin,
+                args: [mcpServerPath],
+                env: {
+                  DRAWIO_BRIDGE_URL: bridge.url,
+                  DRAWIO_BRIDGE_TOKEN: bridge.token,
+                  DRAWIO_WINDOW_ID: String(wcId),
+                  DRAWIO_ELK_URL: localElkPath,
+                  DRAWIO_SHAPE_INDEX_PATH: shapeIndexPath,
+                },
+              },
+            },
+          };
+          await writeFile(join(cwd, ".mcp.json"), JSON.stringify(stdMcpConfig, null, 2), "utf8");
+        } catch {}
 
         const brief = opts.brief || `${systemBriefMd.trim()}\n\n${xmlEssentialsMd.trim()}`;
 
