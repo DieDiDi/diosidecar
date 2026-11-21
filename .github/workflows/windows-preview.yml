@@ -1,0 +1,51 @@
+name: Build Windows preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout repository with drawio submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install desktop dependencies
+        run: npm ci
+
+      - name: Install Agent dependencies
+        run: npm --prefix agent ci
+
+      - name: Typecheck Agent
+        run: npm run typecheck:agent
+
+      - name: Package Windows x64
+        run: npm run release:win
+
+      - name: Check preview files
+        run: |
+          foreach ($pattern in @('*.exe', '*.zip')) {
+            if (!(Get-ChildItem -LiteralPath dist -Filter $pattern -File)) {
+              throw "Expected a $pattern preview file in dist"
+            }
+          }
+
+      - name: Upload preview files
+        uses: actions/upload-artifact@v4
+        with:
+          name: diosidecar-windows-x64-preview
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error

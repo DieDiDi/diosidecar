@@ -123,7 +123,7 @@ npm run dev
 
 ## 打包与发布
 
-首次预览工作流面向 macOS Apple Silicon。源码构建、安装包验证和发布步骤见 [构建与发布指南](doc/BUILDING_FOR_PERSONAL_USE.md)。预览构建尚无 Developer ID 签名或公证。
+GitHub Actions 提供 macOS Apple Silicon 和 Windows x64 的预览构建。下载、安装包验证和发布步骤见 [构建与发布指南](doc/BUILDING_FOR_PERSONAL_USE.md)。预览安装包尚无发行签名。
 
 ---
 

@@ -123,7 +123,7 @@ npm run dev
 
 ## Packaging and releases
 
-The initial preview workflow targets macOS on Apple Silicon. See the [build and release guide](doc/BUILDING_FOR_PERSONAL_USE.md) for source builds, installer checks and release steps. Developer ID signing and notarization are pending for preview builds.
+GitHub Actions can build previews for Apple Silicon macOS and Windows x64. See the [build and release guide](doc/BUILDING_FOR_PERSONAL_USE.md) for downloads, installer checks and release steps. Preview builds are unsigned.
 
 ---
 
