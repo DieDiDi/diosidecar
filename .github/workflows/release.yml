@@ -1,0 +1,109 @@
+name: Build macOS preview
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository with drawio submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Check release version
+        if: github.event_name == 'push'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          expected_tag=$(node -p "'v' + require('./package.json').version")
+          if [ "$RELEASE_TAG" != "$expected_tag" ]; then
+            echo "Expected tag $expected_tag, got $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix agent ci
+
+      - name: Check source
+        run: |
+          npm run typecheck:agent
+          npm test
+
+      - name: Package macOS arm64
+        run: npm run release:mac:arm64
+
+      - name: Check packaged app startup
+        run: |
+          set -o pipefail
+          profile=$(mktemp -d)
+          expected=$(node -p "require('./package.json').version")
+          actual=$(dist/mac-arm64/DioSidecar.app/Contents/MacOS/DioSidecar --user-data-dir="$profile" --version | tail -n 1)
+          test "$actual" = "$expected"
+
+      - name: Archive corresponding source
+        run: |
+          set -o pipefail
+          version=$(node -p "require('./package.json').version")
+          archive_root="diosidecar-$version"
+          archive_dir=$(mktemp -d)
+          mkdir -p "$archive_dir/$archive_root/drawio"
+          git archive HEAD | tar -xf - -C "$archive_dir/$archive_root"
+          git -C drawio archive HEAD | tar -xf - -C "$archive_dir/$archive_root/drawio"
+          tar -czf "dist/$archive_root-source.tar.gz" -C "$archive_dir" "$archive_root"
+
+      - name: Upload preview files
+        uses: actions/upload-artifact@v4
+        with:
+          name: diosidecar-preview
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*-source.tar.gz
+          if-no-files-found: error
+
+  draft:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download preview files
+        uses: actions/download-artifact@v4
+        with:
+          name: diosidecar-preview
+          path: release-assets
+
+      - name: Generate checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS.txt
+
+      - name: Create draft prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DioSidecar ${{ github.ref_name }}
+          draft: true
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            This preview targets macOS on Apple Silicon. Automated builds are not signed with a Developer ID or notarized.
+
+            The `-source.tar.gz` archive includes the pinned draw.io editor sources, build scripts and license notices. After extracting it, follow the source build steps in the README starting at `npm run setup`.
+
+            Verify your download against `SHA256SUMS.txt`.
+          files: release-assets/*

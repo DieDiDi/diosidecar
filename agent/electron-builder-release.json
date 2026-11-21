@@ -1,0 +1,120 @@
+{
+  "appId": "io.github.diedidi.diosidecar",
+  "productName": "DioSidecar",
+  "copyright": "Copyright 2026 DioSidecar contributors. Upstream copyrights are listed in THIRD_PARTY_NOTICES.md.",
+  "artifactName": "diosidecar-${version}-${os}-${arch}.${ext}",
+  "asar": true,
+  "extraResources": [
+    { "from": "build/256x256.png", "to": "window-icon.png" }
+  ],
+  "asarUnpack": [
+    "agent/dist/mcp-server.mjs",
+    "agent/shared/search-index.json",
+    "drawio/src/main/webapp/js/elk/drawio-elk.min.js"
+  ],
+  "files": [
+    "**/*",
+    "!**/{.env,.env.*,keys.json,*.pem,*.p12,*.pfx,*.key,*.jsonl}",
+    "!**/WEB-INF{,/**}",
+    "!drawio/src/main/webapp/stencils/**/*.xml",
+    "!drawio/src/main/webapp/shapes{,/**}",
+    "!drawio/src/main/webapp/js/diagramly{,/**}",
+    "drawio/src/main/webapp/js/diagramly/{ElectronApp,DesktopLibrary}.js",
+    "!drawio/src/main/webapp/js/grapheditor{,/**}",
+    "!drawio/src/main/webapp/mxgraph/src{,/**}",
+    "!drawio/src/main/webapp/mxgraph/mxClient.js",
+    "!node_modules/@cantoo/pdf-lib/{cjs,dist,src,ts3.4}{,/**}",
+    "!agent/node_modules{,/**}",
+    "!agent/core{,/**}",
+    "!agent/drawio{,/**}",
+    "!agent/main{,/**}",
+    "!agent/mcp{,/**}",
+    "!agent/skills{,/**}",
+    "!agent/shared/*.js",
+    "agent/dist/**",
+    "agent/shared/search-index.json",
+    "!**/*.map"
+  ],
+  "directories": {
+    "output": "./dist/"
+  },
+  "npmRebuild": false,
+  "afterPack": "build/fuses.mjs",
+  "mac": {
+    "icon": "build/icon.icns",
+    "category": "public.app-category.graphics-design",
+    "identity": null,
+    "target": [
+      "dmg",
+      "zip"
+    ]
+  },
+  "win": {
+    "icon": "build/256x256.png",
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  },
+  "linux": {
+    "executableName": "diosidecar",
+    "category": "Graphics",
+    "icon": "./build",
+    "desktop": {
+      "entry": {
+        "StartupWMClass": "diosidecar"
+      }
+    },
+    "target": [
+      {
+        "target": "AppImage",
+        "arch": [
+          "x64"
+        ]
+      }
+    ]
+  },
+  "appImage": {
+    "compression": "gzip"
+  },
+  "fileAssociations": [
+    {
+      "ext": "drawio",
+      "name": "draw.io Diagram",
+      "description": "draw.io Diagram",
+      "mimeType": "application/vnd.jgraph.mxfile",
+      "role": "Editor"
+    },
+    {
+      "ext": "vsdx",
+      "name": "VSDX Document",
+      "description": "VSDX Document",
+      "mimeType": "application/vnd.visio",
+      "role": "Editor"
+    },
+    {
+      "ext": [
+        "mmd",
+        "mermaid"
+      ],
+      "name": "Mermaid Diagram",
+      "description": "Mermaid Diagram",
+      "mimeType": "text/vnd.mermaid",
+      "role": "Editor"
+    }
+  ]
+}

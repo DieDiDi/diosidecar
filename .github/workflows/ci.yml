@@ -1,0 +1,40 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-check:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - name: Checkout repository with drawio submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Install root & agent dependencies
+        run: |
+          npm ci
+          npm --prefix agent ci
+
+      - name: Typecheck agent
+        run: npm run typecheck:agent
+
+      - name: Build agent bundles & patch drawio hook
+        run: npm run build:agent
+
+      - name: Run tests
+        run: npm test
