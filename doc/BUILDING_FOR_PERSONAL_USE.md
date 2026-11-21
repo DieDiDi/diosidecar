@@ -26,3 +26,5 @@ For a local Apple Silicon `.app` build, run `npm run package:mac`. Use `npm run 
 ## Create a release
 
 For version `0.1.0`, push tag `v0.1.0` from the tested release commit. The tag must match `package.json`. The macOS workflow assembles a draft prerelease with the installer files, source archive and `SHA256SUMS.txt`. The source archive includes the pinned editor, build scripts and third-party notices. Review the draft and describe the platforms and agents you tested before publishing.
+
+To include Windows, run **Attach Windows packages to draft release** from `main` and enter the release tag. It copies the `.exe` and `.zip` from a successful Windows preview built from the tagged commit and attaches `SHA256SUMS-windows-x64.txt` to the existing draft. Run it before publishing the draft.
