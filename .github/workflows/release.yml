@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.0; optional, defaults to package.json version)'
+        description: 'Release tag (optional, defaults to v followed by the package.json version)'
         required: false
         type: string
 
@@ -14,31 +14,70 @@ permissions:
   contents: read
 
 jobs:
+  metadata:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate version and tag
+        id: release
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          commit=$(git rev-parse HEAD)
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "Expected tag $tag, got $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          if [[ -n "$INPUT_TAG" && "$INPUT_TAG" != "$tag" ]]; then
+            echo "Expected tag $tag, got $INPUT_TAG" >&2
+            exit 1
+          fi
+          if tagged_commit=$(git rev-parse --verify --quiet "refs/tags/$tag^{commit}"); then
+            if [[ "$tagged_commit" != "$commit" ]]; then
+              echo "Tag $tag already points to $tagged_commit instead of $commit" >&2
+              exit 1
+            fi
+          fi
+          printf 'version=%s\ntag=%s\ncommit=%s\n' "$version" "$tag" "$commit" >> "$GITHUB_OUTPUT"
+
   build-mac:
-    name: Build macOS
+    name: Build macOS arm64
+    needs: metadata
     runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Checkout repository with drawio submodule
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
+          ref: ${{ needs.metadata.outputs.commit }}
           submodules: true
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
-
-      - name: Check release version
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          expected_tag=$(node -p "'v' + require('./package.json').version")
-          if [ "$RELEASE_TAG" != "$expected_tag" ]; then
-            echo "Expected tag $expected_tag, got $RELEASE_TAG" >&2
-            exit 1
-          fi
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            agent/package-lock.json
 
       - name: Install dependencies
         run: |
@@ -53,49 +92,62 @@ jobs:
       - name: Package macOS arm64
         run: npm run release:mac:arm64
 
-      - name: Check packaged app startup
+      - name: Verify macOS packages and normal app quit
+        timeout-minutes: 5
         run: |
-          set -o pipefail
-          profile=$(mktemp -d)
-          expected=$(node -p "require('./package.json').version")
-          actual=$(dist/mac-arm64/DioSidecar.app/Contents/MacOS/DioSidecar --user-data-dir="$profile" --version | tail -n 1)
-          test "$actual" = "$expected"
+          hdiutil verify "dist/diosidecar-$VERSION-mac-arm64.dmg"
+          node .github/scripts/smoke-mac.mjs "dist/diosidecar-$VERSION-mac-arm64.zip" "$VERSION"
 
       - name: Archive corresponding source
+        shell: bash
         run: |
-          set -o pipefail
-          version=$(node -p "require('./package.json').version")
-          archive_root="diosidecar-$version"
+          archive_root="diosidecar-$VERSION"
           archive_dir=$(mktemp -d)
+          trap 'rm -rf "$archive_dir"' EXIT
           mkdir -p "$archive_dir/$archive_root/drawio"
+          drawio_commit=$(git rev-parse HEAD:drawio)
           git archive HEAD | tar -xf - -C "$archive_dir/$archive_root"
-          git -C drawio archive HEAD | tar -xf - -C "$archive_dir/$archive_root/drawio"
+          git -C drawio archive "$drawio_commit" | tar -xf - -C "$archive_dir/$archive_root/drawio"
           tar -czf "dist/$archive_root-source.tar.gz" -C "$archive_dir" "$archive_root"
 
       - name: Upload macOS preview files
-        uses: actions/upload-artifact@v4
+        id: upload
+        uses: actions/upload-artifact@v7
         with:
           name: diosidecar-macos-arm64
           path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/*-source.tar.gz
+            dist/diosidecar-${{ env.VERSION }}-mac-arm64.dmg
+            dist/diosidecar-${{ env.VERSION }}-mac-arm64.zip
+            dist/diosidecar-${{ env.VERSION }}-source.tar.gz
+          compression-level: 0
+          overwrite: true
           if-no-files-found: error
 
   build-win:
-    name: Build Windows
+    name: Build Windows x64
+    needs: metadata
     runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.metadata.outputs.version }}
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Checkout repository with drawio submodule
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
+          ref: ${{ needs.metadata.outputs.commit }}
           submodules: true
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            agent/package-lock.json
 
       - name: Install desktop dependencies
         run: npm ci
@@ -111,67 +163,69 @@ jobs:
 
       - name: Check preview files
         run: |
-          foreach ($pattern in @('*.exe', '*.zip')) {
-            if (!(Get-ChildItem -LiteralPath dist -Filter $pattern -File)) {
-              throw "Expected a $pattern preview file in dist"
+          foreach ($extension in @('exe', 'zip')) {
+            $path = "dist/diosidecar-${env:VERSION}-win-x64.$extension"
+            if (!(Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
+              throw "Missing or empty preview file $path"
             }
           }
 
       - name: Upload Windows preview files
-        uses: actions/upload-artifact@v4
+        id: upload
+        uses: actions/upload-artifact@v7
         with:
           name: diosidecar-windows-x64
           path: |
-            dist/*.exe
-            dist/*.zip
+            dist/diosidecar-${{ env.VERSION }}-win-x64.exe
+            dist/diosidecar-${{ env.VERSION }}-win-x64.zip
+          compression-level: 0
+          overwrite: true
           if-no-files-found: error
 
   publish:
-    name: Publish Draft Release
-    needs: [build-mac, build-win]
+    name: Create draft release
+    needs: [metadata, build-mac, build-win]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: release-${{ needs.metadata.outputs.tag }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Download macOS and Windows artifacts
+        uses: actions/download-artifact@v8
         with:
-          persist-credentials: false
-
-      - name: Determine tag name
-        id: meta
-        shell: bash
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${{ github.ref_name }}"
-          else
-            TAG="v$(node -p "require('./package.json').version")"
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
+          artifact-ids: ${{ needs.build-mac.outputs.artifact }},${{ needs.build-win.outputs.artifact }}
           path: release-assets
           merge-multiple: true
 
-      - name: Inspect and generate unified checksums
+      - name: Verify release files and generate checksums
         working-directory: release-assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          ls -la
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          base="diosidecar-$VERSION"
+          files=("$base-mac-arm64.dmg" "$base-mac-arm64.zip" "$base-source.tar.gz" "$base-win-x64.exe" "$base-win-x64.zip")
+          for file in "${files[@]}"; do
+            if [[ ! -s "$file" ]]; then
+              echo "Missing or empty release file $file" >&2
+              exit 1
+            fi
+          done
+          sha256sum "${files[@]}" > SHA256SUMS.txt
 
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: DioSidecar ${{ steps.meta.outputs.tag }}
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          target_commitish: ${{ needs.metadata.outputs.commit }}
+          name: DioSidecar ${{ needs.metadata.outputs.tag }}
           draft: true
           prerelease: true
           generate_release_notes: true
+          fail_on_unmatched_files: true
           body: |
             This release includes automated desktop preview packages for macOS (Apple Silicon) and Windows (x64).
             Automated builds are not signed or notarized.

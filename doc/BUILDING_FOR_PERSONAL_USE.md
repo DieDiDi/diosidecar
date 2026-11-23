@@ -18,13 +18,11 @@ For a local Apple Silicon `.app` build, run `npm run package:mac`. Use `npm run 
 
 ## Validate a preview
 
-1. In the Actions tab, choose **Build macOS preview** or **Build Windows preview**, then click **Run workflow**.
-2. Once the run succeeds, download its **Artifacts**. The Windows artifact `diosidecar-windows-x64-preview` includes the installer and ZIP. The macOS artifact also includes a corresponding source archive that can be built with `npm run setup` after extracting it.
-3. Open the app with a clean test profile or on a separate test account. Open the Agent sidebar, connect a test backend, edit a sample diagram, undo once, save and reopen. Check that two open documents keep their edits separate.
-4. Check the signing status before distribution. The preview workflows produce unsigned installers. For macOS distribution, use an Apple Developer ID certificate and notarization.
+1. In the Actions tab, choose **Release**, then click **Run workflow**. Leave the tag blank to use the version in `package.json`. A successful run also prepares a draft prerelease.
+2. Download the run's `diosidecar-macos-arm64` and `diosidecar-windows-x64` artifacts. The macOS artifact includes the corresponding source archive. To repeat the macOS launch and quit check locally, run `node .github/scripts/smoke-mac.mjs <macOS zip path> <version>` from the repository.
+3. Open the app with a clean test profile or on a separate test account. Open the Agent sidebar, connect a test backend, edit a sample diagram, undo once, save and reopen. Check that two open documents keep their edits separate, then quit the app from its menu.
+4. Check the signing status before distribution. The release workflow produces preview installers without a distribution signature. For macOS distribution, use an Apple Developer ID certificate and notarization.
 
 ## Create a release
 
-For version `0.1.0`, push tag `v0.1.0` from the tested release commit. The tag must match `package.json`. The macOS workflow assembles a draft prerelease with the installer files, source archive and `SHA256SUMS.txt`. The source archive includes the pinned editor, build scripts and third-party notices. Review the draft and describe the platforms and agents you tested before publishing.
-
-To include Windows, run **Attach Windows packages to draft release** from `main` and enter the release tag. It copies the `.exe` and `.zip` from a successful Windows preview built from the tagged commit and attaches `SHA256SUMS-windows-x64.txt` to the existing draft. Run it before publishing the draft.
+Push a `v<version>` tag from the tested release commit. The version must match `package.json`. The Release workflow assembles a draft prerelease with the macOS and Windows installers, source archive and `SHA256SUMS.txt`. The source archive includes the pinned editor, build scripts and third-party notices. Review the draft and describe the platforms and agents you tested before publishing.

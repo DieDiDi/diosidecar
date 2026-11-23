@@ -2,6 +2,7 @@
 // Modified for DioSidecar, 2026-11-21. See THIRD_PARTY_NOTICES.md.
 import fs from 'fs';
 import { promises as fsProm } from 'fs';
+import { randomUUID } from 'node:crypto';
 import path from 'path';
 import url from 'url';
 import {Menu as menu, shell, dialog, session, screen, ClipboardItem,
@@ -197,6 +198,11 @@ function safeUpdaterListener(label, fn)
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const PROJECT_URL = 'https://github.com/DieDiDi/diosidecar';
 const windowIcon = app.isPackaged ? path.join(process.resourcesPath, 'window-icon.png') : path.join(__dirname, '../../build/256x256.png');
+const CLOSE_REPLY_TIMEOUT_MS = 5000;
+
+// The bundled editor, exporter and Visio importer look for this product token
+// before enabling their Electron IPC, including the unsaved-changes check.
+app.userAgentFallback += ' draw.io/' + app.getVersion();
 
 //Command option to disable hardware acceleration
 if (process.argv.indexOf('--disable-acceleration') !== -1)
@@ -687,15 +693,63 @@ function createWindow (opt = {})
 		mainWindow.webContents.send('resize')
 	});
 
-	let uniqueIsModifiedId, modifiedModalOpen = false;
+	const contents = mainWindow.webContents;
+	let editorReady = false;
+	let closeRequest = null;
+	let closeReplyTimer;
 
-	ipcMain.on('isModified-result', async (e, data) =>
+	function isEditorFrame(event)
 	{
-		if (!validateSender(e.senderFrame) || uniqueIsModifiedId != data.uniqueId || modifiedModalOpen) return null;
+		return event.senderFrame === contents.mainFrame && validateSender(event.senderFrame);
+	}
+
+	contents.ipc.on('app-load-finished', (event) =>
+	{
+		if (isEditorFrame(event)) editorReady = true;
+	});
+	contents.on('did-navigate', () => { editorReady = false; });
+	contents.on('render-process-gone', () => { editorReady = false; });
+
+	function cancelClose()
+	{
+		closeRequest = null;
+		cmdQPressed = false;
+		restartForUpdate = false;
+	}
+
+	function destroyWindow()
+	{
+		if (!mainWindow.isDestroyed()) mainWindow.destroy();
+	}
+
+	function confirmUnresponsiveClose()
+	{
+		closeRequest.phase = 'confirming';
+		const keepOpen = 0;
+		const response = dialog.showMessageBoxSync(mainWindow,
+		{
+			type: 'warning',
+			buttons: ['Keep Open', 'Close Window'],
+			defaultId: keepOpen,
+			cancelId: keepOpen,
+			noLink: true,
+			message: 'The editor did not respond to the close request.',
+			detail: 'Closing this window may discard unsaved changes.'
+		});
+
+		if (response === keepOpen) cancelClose();
+		else destroyWindow();
+	}
+
+	contents.ipc.on('isModified-result', async (event, data) =>
+	{
+		if (closeRequest?.phase !== 'checking' || closeRequest.id !== data?.uniqueId || !isEditorFrame(event)) return;
+
+		clearTimeout(closeReplyTimer);
+		closeRequest.phase = 'confirming';
 
 		if (data.isModified)
 		{
-			modifiedModalOpen = true;
 			// Button order follows platform conventions, indices are mapped below.
 			// Enter triggers Save, Esc triggers Cancel, Alt+S/Alt+D work on Windows and Linux
 			let saveBtn = 0, cancelBtn, discardBtn, buttons;
@@ -731,28 +785,8 @@ function createWindow (opt = {})
 			{
 				//Save in the renderer (opens Save As dialog for new files), then
 				//close the window unless saving failed or was cancelled
-				const saveUniqueId = uniqueIsModifiedId;
-				mainWindow.webContents.send('saveAndClose', saveUniqueId);
-
-				const saveAndCloseResult = (e, result) =>
-				{
-					if (!validateSender(e.senderFrame) || saveUniqueId != result.uniqueId) return null;
-
-					ipcMain.removeListener('saveAndClose-result', saveAndCloseResult);
-
-					if (result.success && !mainWindow.isDestroyed())
-					{
-						mainWindow.destroy();
-					}
-					else
-					{
-						cmdQPressed = false;
-						restartForUpdate = false;
-						modifiedModalOpen = false;
-					}
-				};
-
-				ipcMain.on('saveAndClose-result', saveAndCloseResult);
+				closeRequest.phase = 'saving';
+				contents.send('saveAndClose', closeRequest.id);
 			}
 			else if (response === discardBtn)
 			{
@@ -769,57 +803,66 @@ function createWindow (opt = {})
 						// a save deleted it and the next draft was not written yet
 					}
 
-					mainWindow.destroy();
+					destroyWindow();
 				}
 				else
 				{
-					mainWindow.webContents.send('removeDraft');
-
-					ipcMain.once('draftRemoved', (e) =>
-					{
-						if (!validateSender(e.senderFrame)) return null;
-
-						mainWindow.destroy();
-					});
+					closeRequest.phase = 'discarding';
+					// The user has already chosen to discard their changes. Exit even
+					// if the renderer cannot confirm that it removed the draft.
+					closeReplyTimer = setTimeout(destroyWindow, CLOSE_REPLY_TIMEOUT_MS);
+					contents.send('removeDraft');
 				}
 			}
 			else
 			{
-				cmdQPressed = false;
-				restartForUpdate = false;
-				modifiedModalOpen = false;
+				cancelClose();
 			}
 		}
 		else
 		{
-			mainWindow.destroy();
+			destroyWindow();
 		}
 	});
-	
+
+	contents.ipc.on('saveAndClose-result', (event, result) =>
+	{
+		if (closeRequest?.phase !== 'saving' || closeRequest.id !== result?.uniqueId || !isEditorFrame(event)) return;
+
+		if (result.success) destroyWindow();
+		else cancelClose();
+	});
+
+	contents.ipc.on('draftRemoved', (event) =>
+	{
+		if (closeRequest?.phase === 'discarding' && isEditorFrame(event)) destroyWindow();
+	});
+
 	mainWindow.on('close', (event) =>
 	{
-		uniqueIsModifiedId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+		rememberWinSize(mainWindow);
+
+		// The modification-check handler is installed when the editor initializes.
+		// A window that has not initialized or has crashed can close natively.
+		if (!editorReady || contents.isCrashed()) return;
+
+		event.preventDefault();
+		if (closeRequest != null) return;
+
+		closeRequest = {id: randomUUID(), phase: 'checking'};
+		closeReplyTimer = setTimeout(confirmUnresponsiveClose, CLOSE_REPLY_TIMEOUT_MS);
+		contents.send('isModified', closeRequest.id);
 
 		if (__DEV__)
 		{
-			const index = windowsRegistry.indexOf(mainWindow)
-			console.log('Window on close', index, uniqueIsModifiedId)
+			console.log('Window on close', windowsRegistry.indexOf(mainWindow), closeRequest.id);
 		}
-		
-		const contents = mainWindow.webContents
-
-		if (contents != null)
-		{
-			contents.send('isModified', uniqueIsModifiedId);
-			event.preventDefault();
-		}
-
-		rememberWinSize(mainWindow);
 	})
 
 	// Emitted when the window is closed.
 	mainWindow.on('closed', () =>
 	{
+		clearTimeout(closeReplyTimer);
 		const index = windowsRegistry.indexOf(mainWindow)
 		
 		if (__DEV__) 

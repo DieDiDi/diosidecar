@@ -398,7 +398,7 @@ export function initDrawioAgent({ app, ipcMain, BrowserWindow, safeStorage, dial
     },
   });
 
-  app.on("before-quit", () => {
+  app.on("will-quit", () => {
     for (const [wcId] of [...windowSessions]) {
       void closeWindowSession(wcId);
     }

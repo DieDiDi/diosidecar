@@ -1,7 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect x="64" y="64" width="896" height="896" rx="208" fill="#14233b"/>
-  <path d="M405 333h152a99 99 0 0 1 99 99v109" fill="none" stroke="#51dcc7" stroke-linecap="round" stroke-width="58"/>
-  <rect x="252" y="256" width="182" height="154" rx="36" fill="#f2f6ff"/>
-  <rect x="559" y="525" width="194" height="166" rx="41" fill="#51dcc7"/>
-  <path d="M591 761h130" stroke="#7188a6" stroke-linecap="round" stroke-width="36"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0.65" y2="1">
+      <stop stop-color="#ff941f"/>
+      <stop offset="1" stop-color="#df5608"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="77" width="896" height="896" rx="208" fill="#832b06" opacity=".24"/>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#tile)"/>
+  <rect x="68" y="68" width="888" height="888" rx="204" fill="none" stroke="#fff0d8" stroke-opacity=".23" stroke-width="8"/>
+  <path d="M280 569l102-143m134 143L414 426"
+        fill="none" stroke="#ffe6c2" stroke-width="40" stroke-linecap="round"/>
+  <rect x="324" y="324" width="148" height="127" rx="41" fill="#fffaf1"/>
+  <rect x="190" y="558" width="148" height="129" rx="36" fill="#fffaf1"/>
+  <rect x="476" y="576" width="112" height="93" rx="24" fill="#ec6e14" stroke="#fffaf1" stroke-width="36"/>
+  <path d="M662 321v382" fill="none" stroke="#ffcf9c" stroke-width="36" stroke-linecap="round"/>
+  <path d="M742 449h65q29 0 29 29v44q0 29-29 29h-42l-35 27v-30q-17-8-17-26v-44q0-29 29-29z" fill="#fffaf1"/>
 </svg>

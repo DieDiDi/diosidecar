@@ -1,7 +1,7 @@
 {
   "name": "diosidecar",
   "productName": "DioSidecar",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "description": "A desktop diagram editor with an embedded ACP agent and live canvas editing",
   "author": "DioSidecar contributors",
