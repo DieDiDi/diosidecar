@@ -36,10 +36,22 @@ export function stripApiKeys(env: Record<string, string>, names: string[]): Reco
   return out;
 }
 
+/* Windows treats environment variable names as case-insensitive. Node picks one if both spellings are passed. */
+function normalizeWindowsPath(env: Record<string, string>): Record<string, string> {
+  const normalized = { ...env };
+  const pathKeys = Object.keys(normalized).filter((key) => key.toUpperCase() === "PATH");
+  const path = normalized["PATH"] ?? (pathKeys[0] !== undefined ? normalized[pathKeys[0]] : undefined);
+  for (const key of pathKeys) delete normalized[key];
+  if (path !== undefined) normalized["PATH"] = path;
+  return normalized;
+}
+
 /** Put `dir` first on PATH (so a chosen `node` wins over another one). */
 export function withPathFirst(env: Record<string, string>, dir: string | undefined): Record<string, string> {
   if (!dir) return env;
-  const sep = dir.includes("\\") ? ";" : ":"; // a Windows directory: its drive letter has a colon, PATH is split on ;
+  const windows = dir.includes("\\") || /^[a-z]:/i.test(dir);
+  const sep = windows ? ";" : ":";
+  if (windows) env = normalizeWindowsPath(env);
   const parts = (env["PATH"] ?? "").split(sep).filter(Boolean);
   return { ...env, PATH: [dir, ...parts.filter((p) => p !== dir)].join(sep) };
 }
@@ -59,6 +71,7 @@ const WINDOWS_EXECUTABLE = /\.(exe|cmd|bat|com)$/i;
  */
 export async function findBinary(spawner: Spawner, env: Record<string, string>, name: string, extraDirs: string[] = []): Promise<string | null> {
   if (spawner.windows) {
+    env = normalizeWindowsPath(env);
     const path = [env["PATH"], ...extraDirs.map((d) => d.replace(/\//g, "\\"))].filter(Boolean).join(";");
     try {
       const r = await spawner.run(`${env["SystemRoot"] ?? "C:\\Windows"}\\System32\\where.exe`, [name], { env: { ...env, PATH: path }, timeoutMs: 10_000 });

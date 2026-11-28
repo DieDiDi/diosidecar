@@ -7,6 +7,7 @@
 import type { Spawner } from "../types.ts";
 import type { BridgeSpec } from "./backends.ts";
 import { dirnameOf, findBinary, withPathFirst } from "./env.ts";
+import { shimTarget } from "./windows.ts";
 
 export interface BridgeLocation {
   /** The bridge's JS entry (its package.json `bin`), absolute. */
@@ -115,8 +116,19 @@ async function install(opts: EnsureBridgeOpts): Promise<BridgeLocation> {
   const npm = await findBinary(spawner, env, "npm");
   if (!npm) throw new Error(`npm was not found on your PATH, so ${spec.label}'s bridge (${spec.pkg}) cannot be installed. Install Node.js (it includes npm).`);
 
+  let command = npm;
+  let args: string[] = [];
+  if (spawner.windows && /\.(cmd|bat)$/i.test(npm)) {
+    // CreateProcess cannot launch a batch file directly. Run the npm CLI behind the shim.
+    const shim = await spawner.run(node, ["-e", 'process.stdout.write(require("fs").readFileSync(process.argv[1], "utf8"))', npm], { env, timeoutMs: 10_000 });
+    const target = shim.code === 0 ? shimTarget(shim.stdout) : null;
+    if (!target) throw new Error(`Could not resolve the npm CLI from ${npm}.`);
+    command = node;
+    args = [`${dirnameOf(npm)}\\${target}`];
+  }
+
   opts.onProgress?.(`Installing ${spec.pkg}@${spec.version}…`);
-  const r = await spawner.run(npm, ["install", "--prefix", bridgeDir, `${spec.pkg}@${spec.version}`, "--no-audit", "--no-fund", "--loglevel=error"], {
+  const r = await spawner.run(command, [...args, "install", "--prefix", bridgeDir, `${spec.pkg}@${spec.version}`, "--no-audit", "--no-fund", "--loglevel=error"], {
     env,
     timeoutMs: 600_000,
   });

@@ -9,13 +9,14 @@ const END = "__ZMC_ENV_END__";
 const SKIP = new Set(["_", "SHLVL", "PWD", "OLDPWD"]);
 
 /**
- * The login shell's environment (`$SHELL -lc`), merged over this process's. rc-file noise (banners,
+ * On Windows, use the inherited environment. On other platforms, use the login shell's environment (`$SHELL -lc`), merged over this process's. rc-file noise (banners,
  * `echo`s in .zshrc) is ignored: only what sits between the markers is read. `env -0` keeps values
  * with newlines intact.
  */
 export async function loginEnv(timeoutMs = 10_000): Promise<Record<string, string>> {
   const base: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) base[k] = v;
+  if (process.platform === "win32") return base;
   const shell = process.env["SHELL"] || "/bin/sh";
   const out = await new Promise<string>((resolve) => {
     let text = "";
@@ -65,6 +66,7 @@ export function createNodeSpawner(opts: NodeSpawnerOpts = {}): Spawner {
   let cached: Promise<Record<string, string>> | undefined;
 
   return {
+    windows: process.platform === "win32",
     baseEnv(): Promise<Record<string, string>> {
       if (opts.baseEnv) return Promise.resolve({ ...opts.baseEnv });
       cached ??= loginEnv();
