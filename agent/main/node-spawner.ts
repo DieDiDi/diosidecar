@@ -1,6 +1,5 @@
 // A Spawner (see src/types.ts) backed by node:child_process, for tests and the dev harness.
-// Mirrors what the Gecko one must do: the child leads its own process group (kill() signals the
-// whole group), baseEnv() is the login-shell environment, spawn failures reject.
+// On Unix the child leads its own process group (kill() signals the whole group).
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import type { Proc, Spawner } from "../core/types.ts";
 
@@ -63,10 +62,13 @@ export interface NodeSpawnerOpts {
 
 export function createNodeSpawner(opts: NodeSpawnerOpts = {}): Spawner {
   const graceMs = opts.graceMs ?? 2000;
+  const windows = process.platform === "win32";
+  // On Windows, a detached console process opens a terminal even when its stdio is piped.
+  const background = { detached: !windows, windowsHide: true };
   let cached: Promise<Record<string, string>> | undefined;
 
   return {
-    windows: process.platform === "win32",
+    windows,
     baseEnv(): Promise<Record<string, string>> {
       if (opts.baseEnv) return Promise.resolve({ ...opts.baseEnv });
       cached ??= loginEnv();
@@ -75,7 +77,7 @@ export function createNodeSpawner(opts: NodeSpawnerOpts = {}): Spawner {
 
     spawn(command, args, o): Promise<Proc> {
       return new Promise<Proc>((resolve, reject) => {
-        const child = nodeSpawn(command, args, { cwd: o.cwd, env: o.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+        const child = nodeSpawn(command, args, { ...background, cwd: o.cwd, env: o.env, stdio: ["pipe", "pipe", "pipe"] });
         child.once("error", (e) => reject(e));
         child.once("spawn", () => resolve(wrap(child, graceMs)));
       });
@@ -83,7 +85,7 @@ export function createNodeSpawner(opts: NodeSpawnerOpts = {}): Spawner {
 
     run(command, args, o) {
       return new Promise((resolve, reject) => {
-        const child = nodeSpawn(command, args, { cwd: o.cwd, env: o.env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+        const child = nodeSpawn(command, args, { ...background, cwd: o.cwd, env: o.env, stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
         let timedOut = false;

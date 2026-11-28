@@ -12,7 +12,7 @@
 //                            no `models`. session/set_model is -32601; session/set_config_option
 //                            {configId:"model", value} works and accepts a full id ("claude-sonnet-5-5"
 //                            lands on the "sonnet" option). session/set_mode works.
-//   codex-acp 2.1.1          `models` {availableModels:[{modelId:"gpt-5.5[medium]"}], currentModelId},
+//   codex-acp                `models` {availableModels:[{modelId:"gpt-6.2-sol[medium]"}], currentModelId},
 //                            `modes` (read-only, workspace-write, agent, agent-full-access), and
 //                            configOptions too. session/set_model {modelId} and session/set_mode work.
 //   pi-acp 0.0.34            configOptions: model (hundreds of "provider/model") / thought_level;
@@ -114,7 +114,7 @@ export const BACKENDS: Record<BridgedBackendId, BridgeSpec> & Record<"opencode",
     id: "codex",
     label: "Codex",
     pkg: "@agentclientprotocol/codex-acp",
-    version: "2.1.1",
+    version: "2.12.1",
     cli: { name: "codex", hint: "agent.install.codex" },
     modelVia: "set_model",
     effortVia: "model-suffix",
